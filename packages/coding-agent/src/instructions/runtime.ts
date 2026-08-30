@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import type { Agent, AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { classifyTask } from "@oh-my-pi/pi-agent-core";
 import { composeInstructions } from "./compose";
@@ -21,11 +22,19 @@ function taskText(agent: Agent): string {
 
 function stripLegacyWorkflow(prompt: string): string {
 	if (!prompt.includes("Helpful, trusted assistant for load-bearing changes in Oh My Pi coding harness.")) return prompt.trim();
-	return prompt
-		.replace(/\n§ Workflow[\s\S]*?(?=\n§ Delivery|\n§ Critical|$)/g, "")
-		.replace(/\n§ Delivery[\s\S]*?(?=\n§ Critical|$)/g, "")
-		.replace(/\n§ Critical[\s\S]*$/g, "")
-		.trim();
+	return prompt.replace(/\n§ Workflow[\s\S]*?(?=\n§ Delivery|\n§ Critical|$)/g, "").replace(/\n§ Delivery[\s\S]*?(?=\n§ Critical|$)/g, "").replace(/\n§ Critical[\s\S]*$/g, "").trim();
+}
+
+async function persistBenchmarkInstructionTelemetry(telemetry: InstructionTelemetry): Promise<void> {
+	const evidenceFile = process.env.OMP_BENCH_EVIDENCE_FILE;
+	if (!evidenceFile) return;
+	try {
+		const sidecar = `${evidenceFile}.instructions.json`;
+		await mkdir(new URL("./", `file://${sidecar}`).pathname.replace(/\/[^/]*$/, ""), { recursive: true }).catch(() => undefined);
+		await Bun.write(sidecar, JSON.stringify({ instructions: telemetry }, null, 2));
+	} catch {
+		// Benchmark sidecar collection is observational and must never affect an agent run.
+	}
 }
 
 function refresh(agent: Agent): void {
@@ -35,7 +44,7 @@ function refresh(agent: Agent): void {
 	const configured = Number.parseInt(process.env.PI_INSTRUCTION_BUDGET_TOKENS ?? "320", 10);
 	const safeBudget = Number.isFinite(configured) && configured > 0 ? configured : 320;
 	const maxTokens = Math.max(96, state.contextPressure !== undefined && state.contextPressure >= 0.9 ? Math.floor(safeBudget * 0.7) : safeBudget);
-	const composed = composeInstructions(state, { maxTokens });
+	const composed = composeInstructions(state, { maxTokens, countTokens: text => agent.tokenizer.countTokens(text, "approximate") });
 	const marker = "[OMP Ultra Dynamic Instructions]";
 	const base = agent.state.systemPrompt.flatMap(block => {
 		if (block.startsWith(marker)) return [];
@@ -44,6 +53,7 @@ function refresh(agent: Agent): void {
 	});
 	agent.state.systemPrompt = [...base, `${marker}\n${composed.text}`];
 	telemetryByAgent.set(agent, composed.telemetry);
+	void persistBenchmarkInstructionTelemetry(composed.telemetry);
 }
 
 function patch(): void {
