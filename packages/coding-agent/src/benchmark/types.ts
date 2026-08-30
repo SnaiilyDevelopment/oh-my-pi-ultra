@@ -11,122 +11,23 @@ export const OUTCOMES = ["SUCCESS", "PARTIAL_SUCCESS", "FAILED", "BLOCKED", "TIM
 export type BenchmarkOutcome = (typeof OUTCOMES)[number];
 export const FAILURE_CAUSES = ["MODEL_FAILURE", "TOOL_FAILURE", "CONTEXT_FAILURE", "IMPLEMENTATION_FAILURE", "VERIFICATION_FAILURE", "ENVIRONMENT_FAILURE", "ORCHESTRATION_FAILURE", "UNKNOWN"] as const;
 export type FailureCause = (typeof FAILURE_CAUSES)[number];
-
-export interface BenchmarkVerificationSpec {
-	commands?: string[];
-	requiredPaths?: string[];
-	forbiddenPaths?: string[];
-	expectedText?: Array<{ path: string; text: string }>;
-	timeoutMs?: number;
-}
-export interface BenchmarkTask {
-	id: string;
-	category: BenchmarkCategory;
-	description: string;
-	repository?: string;
-	setup?: string[];
-	prompt: string;
-	expectedOutcome: string;
-	verification: BenchmarkVerificationSpec;
-	difficulty: "simple" | "medium" | "hard";
-	tags: string[];
-	timeout: number;
-}
-export interface BenchmarkTaskSuite { version: number; name: string; description: string; tasks: BenchmarkTask[]; }
-export interface BenchmarkEnvironment {
-	repository: string;
-	repositoryCommit: string;
-	branch: string;
-	os: string;
-	arch: string;
-	runtimeVersions: Record<string, string>;
-	configuration: Record<string, string | number | boolean | undefined>;
-	model?: string;
-	provider?: string;
-	ompCommit?: string;
-	ompUltraCommit?: string;
-	harnessVersion: number;
-}
-export type HumanInterventionType = "none" | "permission_request" | "manual_clarification" | "manual_repair" | "manual_environment_setup" | "manual_recovery";
-export interface HumanIntervention { type: HumanInterventionType; count: number; details?: string[]; }
-export interface ContextMetrics { samples: number; peakTokens?: number; averageTokens?: number; compactionCount?: number; pruningEvents?: number; duplicateSuppression?: number; staleContextReplacements?: number; retrievedMemory?: number; repositoryDiscoveryCalls?: number; }
-export interface ToolMetrics { toolCalls: number; toolOutputTokens?: number; rawOutputBytes?: number; modelFacingOutputBytes?: number; retries?: number; failures: number; parallelGroups?: number; distribution?: Record<string, number>; }
-export interface OrchestrationMetrics { initialComplexity?: string; initialWorkflow?: string; finalComplexity?: string; phases?: string[]; strategyChanges?: number; escalations?: number; stagnationDetections?: number; specialistDecisions?: number; specialistCalls?: number; parallelGroups?: number; verificationDepth?: string; }
-export interface LatencyMetrics { totalMs: number; modelMs: number; toolMs: number; verificationMs: number; orchestrationMs: number; waitingMs: number; specialistMs: number; parallelSavingsMs?: number; }
-export interface BenchmarkMetrics {
-	success: boolean;
-	testsPassed: number;
-	regressions: number;
-	inputTokens: number;
-	outputTokens: number;
-	toolOutputTokens: number;
-	reasoningTokens: number;
-	totalTokens: number;
-	modelCalls: number;
-	toolCalls: number;
-	retryCount: number;
-	repairAttempts: number;
-	escalations: number;
-	specialistInvocations: number;
-	parallelGroups: number;
-	wallClockMs: number;
-	humanInterventions: number;
-	finalVerificationState: string;
-	context: ContextMetrics;
-	tools: ToolMetrics;
-	orchestration: OrchestrationMetrics;
-	latency: LatencyMetrics;
-	costUsd?: number;
-	costUnknownReason?: string;
-	failureCause?: FailureCause;
-}
-export interface BenchmarkTelemetryEvidence {
-	summary?: AgentRunSummary;
-	coverage?: AgentRunCoverage;
-	context?: Partial<ContextMetrics>;
-	tools?: Partial<ToolMetrics>;
-	orchestration?: Partial<OrchestrationMetrics>;
-	specialists?: { decisions?: number; invocations?: number; parallelGroups?: number };
-	verification?: { state?: string; testsPassed?: number; regressions?: number; repairAttempts?: number; escalations?: number };
-	humanInterventions?: HumanIntervention[];
-	latency?: Partial<LatencyMetrics>;
-	failureCause?: FailureCause;
-	costUsd?: number;
-	costUnknownReason?: string;
-}
-export interface VerificationRecord { commands: Array<{ commandHash: string; exitCode: number; durationMs: number }>; requiredPathsMissing: string[]; forbiddenPathsFound: string[]; expectedTextMissing: string[]; finalState: string; }
-export interface BenchmarkRunRecord {
-	version: number;
-	runId: string;
-	taskId: string;
-	category: BenchmarkCategory;
-	variant: BenchmarkVariant;
-	attempt: number;
-	startedAt: string;
-	durationMs: number;
-	environment: BenchmarkEnvironment;
-	outcome: BenchmarkOutcome;
-	failureCause: FailureCause;
-	failureDetail?: string;
-	metrics: BenchmarkMetrics;
-	verification: VerificationRecord;
-	telemetry: BenchmarkTelemetryEvidence;
-	artifacts: { stdoutLog?: string; stderrLog?: string };
-	reproducibility: { taskFingerprint: string; commandProfile: string; probabilisticModelRun: boolean };
-}
-export interface BenchmarkRunSet {
-	version: number;
-	runSetId: string;
-	createdAt: string;
-	suiteName: string;
-	suiteVersion: number;
-	tasks: string[];
-	variants: BenchmarkVariant[];
-	runs: string[];
-	config: { runsPerTask: number; timeoutMs: number; repositoryOverride?: string; model?: string; provider?: string };
-}
-export interface MetricStats { mean: number; median: number; p95: number; min: number; max: number; n: number; }
-export interface SideSummary { successRate: number; successCount: number; total: number; successInterval: { low: number; high: number }; tokens: MetricStats; latencyMs: MetricStats; modelCalls: MetricStats; toolCalls: MetricStats; humanInterventionRate: number; }
-export interface CategoryComparison { category: BenchmarkCategory | "overall"; baseline: SideSummary; ultra: SideSummary; deltas: { successRate: number; tokensRatio: number | null; latencyRatio: number | null; modelCallsRatio: number | null; toolCallsRatio: number | null; humanInterventionRate: number }; flags: string[]; }
-export interface ComparisonReport { version: number; baselineRunSet: string; ultraRunSet: string; sampleCounts: { baseline: number; ultra: number }; overall: CategoryComparison; categories: CategoryComparison[]; notes: string[]; }
-export interface RegressionThresholds { successRateDelta: number; tokenIncreaseRatio: number; latencyIncreaseRatio: number; modelCallIncreaseRatio: number; toolCallIncreaseRatio: number; }
+export interface BenchmarkVerificationSpec { commands?: string[]; requiredPaths?: string[]; forbiddenPaths?: string[]; expectedText?: Array<{ path: string; text: string }>; timeoutMs?: number; }
+export interface BenchmarkTask { id:string; category:BenchmarkCategory; description:string; repository?:string; setup?:string[]; prompt:string; expectedOutcome:string; verification:BenchmarkVerificationSpec; difficulty:"simple"|"medium"|"hard"; tags:string[]; timeout:number; commands?:{baseline?:string;ultra?:string}; }
+export interface BenchmarkTaskSuite { version:number; name:string; description:string; tasks:BenchmarkTask[]; }
+export interface BenchmarkEnvironment { repository:string; repositoryCommit:string; branch:string; os:string; arch:string; runtimeVersions:Record<string,string>; configuration:Record<string,string|number|boolean|undefined>; model?:string; provider?:string; ompCommit?:string; ompUltraCommit?:string; harnessVersion:number; }
+export type HumanInterventionType="none"|"permission_request"|"manual_clarification"|"manual_repair"|"manual_environment_setup"|"manual_recovery";
+export interface HumanIntervention { type:HumanInterventionType; count:number; details?:string[]; }
+export interface ContextMetrics { samples:number; peakTokens?:number; averageTokens?:number; compactionCount?:number; pruningEvents?:number; duplicateSuppression?:number; staleContextReplacements?:number; retrievedMemory?:number; repositoryDiscoveryCalls?:number; }
+export interface ToolMetrics { toolCalls:number; toolOutputTokens?:number; rawOutputBytes?:number; modelFacingOutputBytes?:number; retries?:number; failures:number; parallelGroups?:number; distribution?:Record<string,number>; }
+export interface OrchestrationMetrics { initialComplexity?:string; initialWorkflow?:string; finalComplexity?:string; phases?:string[]; strategyChanges?:number; escalations?:number; stagnationDetections?:number; specialistDecisions?:number; specialistCalls?:number; parallelGroups?:number; verificationDepth?:string; }
+export interface LatencyMetrics { totalMs:number; modelMs:number; toolMs:number; verificationMs:number; orchestrationMs:number; waitingMs:number; specialistMs:number; parallelSavingsMs?:number; }
+export interface BenchmarkMetrics { success:boolean; testsPassed:number; regressions:number; inputTokens:number; outputTokens:number; toolOutputTokens:number; reasoningTokens:number; totalTokens:number; modelCalls:number; toolCalls:number; retryCount:number; repairAttempts:number; escalations:number; specialistInvocations:number; parallelGroups:number; wallClockMs:number; humanInterventions:number; finalVerificationState:string; context:ContextMetrics; tools:ToolMetrics; orchestration:OrchestrationMetrics; latency:LatencyMetrics; costUsd?:number; costUnknownReason?:string; failureCause?:FailureCause; }
+export interface BenchmarkTelemetryEvidence { summary?:AgentRunSummary; coverage?:AgentRunCoverage; context?:Partial<ContextMetrics>; tools?:Partial<ToolMetrics>; orchestration?:Partial<OrchestrationMetrics>; specialists?:{decisions?:number;invocations?:number;parallelGroups?:number}; verification?:{state?:string;testsPassed?:number;regressions?:number;repairAttempts?:number;escalations?:number}; humanInterventions?:HumanIntervention[]; latency?:Partial<LatencyMetrics>; failureCause?:FailureCause; costUsd?:number; costUnknownReason?:string; }
+export interface VerificationRecord { commands:Array<{commandHash:string;exitCode:number;durationMs:number}>; requiredPathsMissing:string[]; forbiddenPathsFound:string[]; expectedTextMissing:string[]; finalState:string; }
+export interface BenchmarkRunRecord { version:number; runId:string; taskId:string; category:BenchmarkCategory; variant:BenchmarkVariant; attempt:number; startedAt:string; durationMs:number; environment:BenchmarkEnvironment; outcome:BenchmarkOutcome; comparisonEligible:boolean; failureCause:FailureCause; failureDetail?:string; metrics:BenchmarkMetrics; verification:VerificationRecord; telemetry:BenchmarkTelemetryEvidence; artifacts:{stdoutLog?:string;stderrLog?:string}; reproducibility:{taskFingerprint:string;commandProfile:string;probabilisticModelRun:boolean}; }
+export interface BenchmarkRunSet { version:number; runSetId:string; createdAt:string; suiteName:string; suiteVersion:number; tasks:string[]; variants:BenchmarkVariant[]; runs:string[]; config:{runsPerTask:number;timeoutMs:number;repositoryOverride?:string;model?:string;provider?:string;suitePath?:string;}; }
+export interface MetricStats { mean:number; median:number; p95:number; min:number; max:number; n:number; }
+export interface SideSummary { successRate:number; successCount:number; total:number; successInterval:{low:number;high:number}; tokens:MetricStats; latencyMs:MetricStats; modelCalls:MetricStats; toolCalls:MetricStats; humanInterventionRate:number; }
+export interface CategoryComparison { category:BenchmarkCategory|"overall"; baseline:SideSummary; ultra:SideSummary; deltas:{successRate:number;tokensRatio:number|null;latencyRatio:number|null;modelCallsRatio:number|null;toolCallsRatio:number|null;humanInterventionRate:number}; flags:string[]; }
+export interface ComparisonReport { version:number; baselineRunSet:string; ultraRunSet:string; sampleCounts:{baseline:number;ultra:number}; eligibleSampleCounts:{baseline:number;ultra:number}; excludedRuns:{baseline:number;ultra:number}; overall:CategoryComparison; categories:CategoryComparison[]; notes:string[]; }
+export interface RegressionThresholds { successRateDelta:number; tokenIncreaseRatio:number; latencyIncreaseRatio:number; modelCallIncreaseRatio:number; toolCallIncreaseRatio:number; }
