@@ -6,6 +6,8 @@ export * from "./agent-loop";
 export * from "./append-only-context";
 // Context intelligence
 export * from "./context-intelligence";
+// Verification and bounded recovery
+export * from "./verification";
 // Compaction
 export * from "./compaction";
 // Process-global pause gate
@@ -22,8 +24,8 @@ export * from "./telemetry";
 export * from "./thinking";
 // Adaptive deterministic task routing
 export * from "./task-router";
-export { getContextIntelligence, getTaskRouting } from "./task-router-runtime";
-// Runtime router + context integration (single existing agent loop)
+export { getContextIntelligence, getTaskRouting, getVerification } from "./task-router-runtime";
+// Runtime router + context + verification integration (single existing agent loop)
 import "./task-router-runtime";
 // Tokenizer choice
 export * from "./tokenizer";
