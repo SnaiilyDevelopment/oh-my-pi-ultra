@@ -1,4 +1,5 @@
 import { fetchReadUrl } from "../tools/fetch";
+import type { ToolSession } from "../tools";
 import { runSearchQuery, type SearchQueryParams } from "../web/search";
 import type { SearchResponse } from "../web/search/types";
 import { readResearchCache, writeResearchCache } from "./cache";
@@ -7,7 +8,6 @@ import { buildResearchQueries } from "./query";
 import { rankSearchSources } from "./sources";
 import { sanitizeExternalText, sanitizeResearchQuery } from "./security";
 import type { ResearchLocalEvidence, ResearchObjective, ResearchResult, ResearchSource, ResearchTelemetry, ResearchDecision } from "./types";
-import type { ToolSession } from "../sdk";
 
 interface SearchDetails { response?: SearchResponse; }
 
