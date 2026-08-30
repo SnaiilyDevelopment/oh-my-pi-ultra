@@ -11,13 +11,7 @@ async function fixture(): Promise<string> {
 	await fs.mkdir(path.join(root, "src", "auth"), { recursive: true });
 	await fs.mkdir(path.join(root, "test"), { recursive: true });
 	await fs.mkdir(path.join(root, "packages", "api", "src"), { recursive: true });
-	await fs.writeFile(path.join(root, "package.json"), JSON.stringify({
-		name: "fixture-app",
-		workspaces: ["packages/*"],
-		scripts: { build: "bun run build", test: "bun test", "check:types": "tsgo --noEmit", lint: "biome check ." },
-		dependencies: { react: "1.0.0" },
-		devDependencies: { vitest: "1.0.0" },
-	}, null, 2));
+	await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ name: "fixture-app", workspaces: ["packages/*"], scripts: { build: "bun run build", test: "bun test", "check:types": "tsgo --noEmit", lint: "biome check ." }, dependencies: { react: "1.0.0" }, devDependencies: { vitest: "1.0.0" } }, null, 2));
 	await fs.writeFile(path.join(root, "bun.lock"), "fixture\n");
 	await fs.writeFile(path.join(root, "tsconfig.json"), "{}\n");
 	await fs.writeFile(path.join(root, "src", "main.ts"), "export { session } from './auth/session';\n");
@@ -110,13 +104,14 @@ describe("repository intelligence", () => {
 		expect(intelligence.telemetry.invalidations.length).toBeGreaterThan(0);
 	});
 
-	test("removes deleted files without rebuilding a clean repository from scratch", async () => {
+	test("removes deleted files incrementally", async () => {
 		const root = await fixture();
 		const intelligence = new RepositoryIntelligence({ root });
 		await intelligence.refresh("full");
 		await fs.rm(path.join(root, "src", "auth", "session.ts"));
 		const profile = await intelligence.refresh("auto");
-		expect(profile.lastIndexedState.fileCount).toBeLessThan(12);
+		expect(profile.lastIndexedState.fileCount).toBe(12);
+		expect(intelligence.telemetry.indexMode).toBe("incremental");
 		expect(intelligence.findDependencies("src/main.ts")).toEqual([]);
 	});
 
