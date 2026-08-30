@@ -29,6 +29,8 @@ export * from "./task-router";
 export * from "./model-capability";
 // Adaptive orchestration policy coordinates existing subsystems without replacing the loop.
 export * from "./orchestration";
+// Specialist delegation policy and bounded parallel planning.
+export * from "./specialist-orchestration";
 export { getContextIntelligence, getTaskRouting, getVerification } from "./task-router-runtime";
 export { getRepositoryIntelligence } from "./repository-intelligence-runtime";
 export { currentCapabilityProfile, effectiveVerificationDepth, getModelCapabilities, getModelStrategy, shouldUseParallelTools } from "./model-capability-runtime";
