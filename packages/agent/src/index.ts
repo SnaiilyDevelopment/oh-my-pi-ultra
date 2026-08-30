@@ -4,6 +4,8 @@ export * from "./agent";
 export * from "./agent-loop";
 // Append-only context mode
 export * from "./append-only-context";
+// Context intelligence
+export * from "./context-intelligence";
 // Compaction
 export * from "./compaction";
 // Process-global pause gate
@@ -20,8 +22,8 @@ export * from "./telemetry";
 export * from "./thinking";
 // Adaptive deterministic task routing
 export * from "./task-router";
-export { getTaskRouting } from "./task-router-runtime";
-// Runtime router integration (patches Agent.prompt only; no parallel loop)
+export { getContextIntelligence, getTaskRouting } from "./task-router-runtime";
+// Runtime router + context integration (single existing agent loop)
 import "./task-router-runtime";
 // Tokenizer choice
 export * from "./tokenizer";
