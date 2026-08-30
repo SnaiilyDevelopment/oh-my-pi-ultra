@@ -1,5 +1,5 @@
 import { type } from "@oh-my-pi/omptype";
-import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import { classifyTask, type AgentTool, type AgentToolResult, type AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { Text } from "@oh-my-pi/pi-tui";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { Theme } from "../modes/theme/theme";
@@ -28,10 +28,13 @@ export interface ResearchToolDetails {
 }
 
 function localEvidence(params: ResearchToolParams): ResearchLocalEvidence {
+	const classification = classifyTask(params.question);
+	const explicitExternal = classification.signals.externalResearch || /\b(latest|current|official docs?|documentation|migration|upstream|security advisory|cve|research|look ?up|compare|specification|standard)\b/i.test(params.question);
+	const locallyKnowable = classification.complexity === "SIMPLE" && !explicitExternal;
 	return {
-		repositorySufficient: false,
-		memorySufficient: false,
-		unresolvedFacts: params.required_evidence ?? [params.question],
+		repositorySufficient: locallyKnowable,
+		memorySufficient: locallyKnowable,
+		unresolvedFacts: locallyKnowable ? [] : (params.required_evidence ?? [params.question]),
 		framework: params.framework,
 		packageName: params.package,
 		version: params.version,
@@ -56,7 +59,7 @@ export class ResearchTool implements AgentTool<typeof researchSchema, ResearchTo
 
 	async execute(_toolCallId: string, params: ResearchToolParams, _signal?: AbortSignal, _onUpdate?: AgentToolUpdateCallback<ResearchToolDetails>): Promise<AgentToolResult<ResearchToolDetails>> {
 		const local = localEvidence(params);
-		const state = initialResearchState(params.question, undefined, local);
+		const state = initialResearchState(params.question, classifyTask(params.question), local);
 		if (state.decision === "NO_RESEARCH") {
 			const objective = buildResearchObjective(params.question, state.decision, local);
 			const result: ResearchResult = { decision: state.decision, objective, query: "", evidence: [], sources: [], conflicts: [], compact: "NO_RESEARCH: external lookup is unnecessary under the deterministic policy.", fullSourceRefs: [] };
