@@ -8,6 +8,8 @@ export * from "./append-only-context";
 export * from "./context-intelligence";
 // Repository intelligence and incremental project mapping
 export * from "./repository-intelligence";
+// Tool intelligence and high-signal execution projection
+export * from "./tool-intelligence";
 // Verification and bounded recovery
 export * from "./verification";
 // Compaction
@@ -28,7 +30,10 @@ export * from "./thinking";
 export * from "./task-router";
 export { getContextIntelligence, getTaskRouting, getVerification } from "./task-router-runtime";
 export { getRepositoryIntelligence } from "./repository-intelligence-runtime";
-// Runtime router + context + verification + repository intelligence integration
+export { getToolIntelligence } from "./tool-intelligence-runtime";
+// Runtime integrations. Ordering is intentional: tool projection must run before
+// Context Intelligence so Task 02 ranks the signal-first representation.
+import "./tool-intelligence-runtime";
 import "./task-router-runtime";
 import "./repository-intelligence-runtime";
 // Tokenizer choice
