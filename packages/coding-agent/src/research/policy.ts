@@ -12,25 +12,26 @@ export function researchDecision(task: string, classification?: TaskClassificati
 	const value = task.trim();
 	if (!value || LOCAL_ONLY.test(value)) return "NO_RESEARCH";
 	if (orchestration?.failure.present && /network/i.test(orchestration.failure.category ?? "")) return "BLOCKED";
-	if (local?.repositorySufficient && local.memorySufficient && !local.unresolvedFacts.length && !EXTERNAL.test(value)) return "NO_RESEARCH";
 	const explicitExternal = EXTERNAL.test(value) || Boolean(classification?.signals.externalResearch);
 	const security = SECURITY.test(value);
 	const unfamiliar = UNFAMILIAR.test(value) || Boolean(classification?.signals.uncertain);
+	const unresolved = (local?.unresolvedFacts?.length ?? 0) > 0;
+	if (local?.repositorySufficient && local.memorySufficient && !unresolved && !explicitExternal && !security && !unfamiliar) return "NO_RESEARCH";
+	if (!explicitExternal && !security && !unfamiliar && !unresolved) return "NO_RESEARCH";
 	const complex = classification?.complexity === "COMPLEX" || classification?.complexity === "VERY_COMPLEX";
 	if (security && (!local?.repositorySufficient || !local.memorySufficient)) return "DEEP_RESEARCH";
 	if (complex && unfamiliar) return "DEEP_RESEARCH";
-	if (explicitExternal || unfamiliar || (classification?.complexity === "NORMAL" && local?.repositorySufficient !== true)) return "TARGETED_RESEARCH";
+	if (explicitExternal || unfamiliar || unresolved) return "TARGETED_RESEARCH";
 	return "NO_RESEARCH";
 }
 
 export function buildResearchObjective(task: string, decision: ResearchDecision, local?: ResearchLocalEvidence): ResearchObjective {
 	const sanitized = task.replace(/\s+/g, " ").trim().slice(0, 500);
 	const facts = local?.unresolvedFacts?.filter(Boolean).slice(0, 5) ?? [];
-	const question = facts.length > 0 ? facts.join("; ") : sanitized;
 	const deep = decision === "DEEP_RESEARCH";
 	const security = SECURITY.test(`${sanitized} ${facts.join(" ")}`);
 	return {
-		question,
+		question: sanitized,
 		whyNeeded: deep ? "Local repository and durable memory do not contain enough trustworthy evidence for this higher-risk decision." : "A specific external fact is missing from local evidence and can affect the coding decision.",
 		requiredEvidence: facts.length ? facts : ["authoritative statement answering the exact question"],
 		preferredSources: security ? ["security advisory", "official documentation", "official repository", "release notes"] : ["official documentation", "official repository", "release notes", "standards/specifications"],
