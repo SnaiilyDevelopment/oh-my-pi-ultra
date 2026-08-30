@@ -1,6 +1,6 @@
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { classifyTask, createStrategyProfile, deriveModelCapabilities, getRepositoryIntelligence, getVerification, Agent, type AgentMessage, type AgentState } from "@oh-my-pi/pi-agent-core";
-import { MemoryCategory, MemoryCandidate, MemoryScope, ProjectMemoryStore, MemoryTelemetry, projectFingerprint, projectMemoryFilePath, renderProjectMemory } from "./project-memory";
+import { ProjectMemoryStore, projectFingerprint, projectMemoryFilePath, renderProjectMemory, type MemoryCategory, type MemoryCandidate, type MemoryScope, type MemoryTelemetry } from "./project-memory";
 
 const kPatched = Symbol.for("oh-my-pi-ultra.project-memory.patched");
 interface MemoryState extends AgentState { projectMemory?: MemoryTelemetry; }
