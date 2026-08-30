@@ -26,9 +26,12 @@ export * from "./telemetry";
 export * from "./thinking";
 // Adaptive deterministic task routing
 export * from "./task-router";
+export * from "./model-capability";
 export { getContextIntelligence, getTaskRouting, getVerification } from "./task-router-runtime";
 export { getRepositoryIntelligence } from "./repository-intelligence-runtime";
-// Runtime router + context + verification + repository intelligence integration
+export { currentCapabilityProfile, effectiveVerificationDepth, getModelCapabilities, getModelStrategy, shouldUseParallelTools } from "./model-capability-runtime";
+// Runtime integrations. Model capability runs before Task Router so its selected effort is visible to the existing router.
+import "./model-capability-runtime";
 import "./task-router-runtime";
 import "./repository-intelligence-runtime";
 // Tokenizer choice
