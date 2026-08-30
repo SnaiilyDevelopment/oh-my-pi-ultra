@@ -92,12 +92,15 @@ describe("context intelligence", () => {
 		const messages = [
 			toolResult("src/auth/session.ts\n" + long, { toolName: "read", timestamp: 1 }),
 			toolResult("session.test.ts\nERROR: expected 401, received 200", { toolName: "test", isError: true, timestamp: 2 }),
+			toolResult("old unrelated search output", { toolName: "search", timestamp: 3 }),
+			user("background note"),
+			user("another background note"),
 			user("Fix session expiration"),
 		];
 		const result = assembleContext("Fix session expiration", messages, counter, {
 			complexity: "NORMAL",
 			budgetTokens: 500,
-			recentMessageCount: 1,
+			recentMessageCount: 3,
 		});
 		expect(result.telemetry.estimatedTokensAfter).toBeLessThanOrEqual(500);
 		expect(result.telemetry.discardedCandidates + result.telemetry.deduplicatedCandidates).toBeGreaterThan(0);
