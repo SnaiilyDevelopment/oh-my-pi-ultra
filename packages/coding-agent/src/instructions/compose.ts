@@ -1,6 +1,7 @@
 import { baseInstructionLayer } from "./base";
 import { phaseInstructionLayer } from "./phase";
 import { recoveryInstructionLayer } from "./recovery";
+import { researchInstructionLayer } from "./research";
 import { specialistInstructionLayer } from "./specialist";
 import { taskInstructionLayer } from "./task";
 import type { InstructionBudget, InstructionLayer, InstructionState, ComposedInstructions } from "./types";
@@ -56,7 +57,15 @@ function capabilityLayer(state: InstructionState): InstructionLayer | undefined 
 export function composeInstructions(state: InstructionState, budget: InstructionBudget = {}): ComposedInstructions {
 	const started = performance.now();
 	const countTokens = tokenCounter(budget);
-	const candidate: InstructionLayer[] = [baseInstructionLayer(), taskInstructionLayer(state.task), phaseInstructionLayer(state), recoveryInstructionLayer(state), capabilityLayer(state), specialistInstructionLayer(state.specialistRole)].filter((layer): layer is InstructionLayer => layer !== undefined && layer.text.trim().length > 0);
+	const candidate: InstructionLayer[] = [
+		baseInstructionLayer(),
+		taskInstructionLayer(state.task),
+		phaseInstructionLayer(state),
+		recoveryInstructionLayer(state),
+		capabilityLayer(state),
+		researchInstructionLayer(state),
+		specialistInstructionLayer(state.specialistRole),
+	].filter((layer): layer is InstructionLayer => layer !== undefined && layer.text.trim().length > 0);
 	const deduped = dedupeLayerText(candidate);
 	const budgeted = trimToBudget(deduped.layers, budget.maxTokens, countTokens);
 	const ordered = [...budgeted.layers].sort((a, b) => {
@@ -67,5 +76,18 @@ export function composeInstructions(state: InstructionState, budget: Instruction
 	const phaseTokens = countTokens(ordered.filter(layer => layer.name === "phase").map(layer => layer.text).join("\n"));
 	const specialistTokens = countTokens(ordered.filter(layer => layer.name === "specialist").map(layer => layer.text).join("\n"));
 	const totalInstructionTokens = countTokens(ordered.map(layer => layer.text).join("\n"));
-	return { text: ordered.map(layer => `[${layer.name}]\n${layer.text}`).join("\n\n"), layers: ordered, telemetry: { baseTokens, dynamicTokens: Math.max(0, totalInstructionTokens - baseTokens), phaseTokens, specialistTokens, totalInstructionTokens, duplicateInstructionsRemoved: deduped.removed, omittedOptionalInstructions: budgeted.omitted, compositionLatencyMs: performance.now() - started } };
+	return {
+		text: ordered.map(layer => `[${layer.name}]\n${layer.text}`).join("\n\n"),
+		layers: ordered,
+		telemetry: {
+			baseTokens,
+			dynamicTokens: Math.max(0, totalInstructionTokens - baseTokens),
+			phaseTokens,
+			specialistTokens,
+			totalInstructionTokens,
+			duplicateInstructionsRemoved: deduped.removed,
+			omittedOptionalInstructions: budgeted.omitted,
+			compositionLatencyMs: performance.now() - started,
+		},
+	};
 }
