@@ -11,9 +11,7 @@ function textOf(message: AgentMessage): string {
 	const content = (message as { content?: unknown }).content;
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
-	return content
-		.map(block => block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : "")
-		.join(" ");
+	return content.map(block => block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : "").join(" ");
 }
 
 function taskText(agent: Agent): string {
@@ -22,6 +20,7 @@ function taskText(agent: Agent): string {
 }
 
 function stripLegacyWorkflow(prompt: string): string {
+	if (!prompt.includes("Helpful, trusted assistant for load-bearing changes in Oh My Pi coding harness.")) return prompt.trim();
 	return prompt
 		.replace(/\n§ Workflow[\s\S]*?(?=\n§ Delivery|\n§ Critical|$)/g, "")
 		.replace(/\n§ Delivery[\s\S]*?(?=\n§ Critical|$)/g, "")
@@ -38,7 +37,8 @@ function refresh(agent: Agent): void {
 	const maxTokens = Math.max(96, state.contextPressure !== undefined && state.contextPressure >= 0.9 ? Math.floor(safeBudget * 0.7) : safeBudget);
 	const composed = composeInstructions(state, { maxTokens });
 	const marker = "[OMP Ultra Dynamic Instructions]";
-	const base = agent.state.systemPrompt.filter(block => !block.startsWith(marker)).flatMap(block => {
+	const base = agent.state.systemPrompt.flatMap(block => {
+		if (block.startsWith(marker)) return [];
 		const stripped = stripLegacyWorkflow(block);
 		return stripped ? [stripped] : [];
 	});
