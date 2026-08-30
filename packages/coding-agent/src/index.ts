@@ -43,6 +43,7 @@ export { getSpecialistOrchestration } from "./task/specialist-orchestration-runt
 export * from "./benchmark";
 export * from "./instructions";
 export { getInstructionTelemetry, refreshDynamicInstructions, activeSpecialistRole } from "./instructions/runtime";
+export * from "./research";
 export * from "./tools";
 export * from "./utils/github";
 export {
@@ -52,3 +53,4 @@ export {
 };
 import "./task/specialist-orchestration-runtime";
 import "./instructions/runtime";
+import "./research/runtime";
