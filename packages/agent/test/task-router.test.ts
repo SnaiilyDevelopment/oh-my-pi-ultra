@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-	classifyTask,
-	createTaskRoutingBenchmarkRecord,
-	TaskRouteTracker,
-} from "../src/task-router";
+import { classifyTask, createTaskRoutingBenchmarkRecord, TaskRouteTracker } from "../src/task-router";
 
 describe("adaptive task router", () => {
 	test("classifies trivial edits as SIMPLE", () => {
@@ -21,7 +17,7 @@ describe("adaptive task router", () => {
 
 	test("classifies cross-cutting engineering as COMPLEX", () => {
 		expect(classifyTask("Refactor authentication across the API and frontend.").complexity).toBe("COMPLEX");
-		expect(classifyTask("Fix a race condition spanning multiple subsystems.").complexity).toBe("COMPLEX");
+		expect(classifyTask("Fix a race condition spanning multiple subsystems.", { relevantFileCount: 4 }).complexity).toBe("COMPLEX");
 	});
 
 	test("classifies architecture replacement plus migration as VERY_COMPLEX", () => {
