@@ -1,7 +1,8 @@
-import type { OrchestrationState, TaskClassification } from "@oh-my-pi/pi-agent-core";
-import { deriveModelCapabilities, type ModelCapabilities } from "@oh-my-pi/pi-agent-core";
-import type { Agent } from "@oh-my-pi/pi-agent-core";
+import type { Agent, ModelCapabilities, OrchestrationState, TaskClassification } from "@oh-my-pi/pi-agent-core";
+import { deriveModelCapabilities } from "@oh-my-pi/pi-agent-core";
 import type { InstructionModelState, InstructionState, SpecialistInstructionRole } from "./types";
+
+const ROLES = ["EXPLORER", "ARCHITECT", "DEBUGGER", "TEST_ENGINEER", "REVIEWER", "SECURITY_REVIEWER", "RESEARCHER"] as const;
 
 export function modelInstructionState(capabilities: ModelCapabilities | undefined): InstructionModelState | undefined {
 	if (!capabilities) return undefined;
@@ -17,42 +18,38 @@ export function modelInstructionState(capabilities: ModelCapabilities | undefine
 export function specialistRoleFromState(value: unknown): SpecialistInstructionRole | undefined {
 	if (typeof value !== "string") return undefined;
 	const normalized = value.toUpperCase() as SpecialistInstructionRole;
-	return ["EXPLORER", "ARCHITECT", "DEBUGGER", "TEST_ENGINEER", "REVIEWER", "SECURITY_REVIEWER", "RESEARCHER"].includes(normalized) ? normalized : undefined;
+	return ROLES.includes(normalized as (typeof ROLES)[number]) ? normalized : undefined;
 }
 
-export function instructionStateFromAgent(
-	agent: Agent,
-	classification: TaskClassification | undefined,
-): InstructionState {
+export function instructionStateFromAgent(agent: Agent, classification?: TaskClassification): InstructionState {
 	const state = agent.state as typeof agent.state & { orchestration?: OrchestrationState; specialistRole?: unknown };
 	const orchestration = state.orchestration;
-	const failure = orchestration?.failureEvidence;
-	const verification = orchestration?.verificationEvidence;
 	const task = classification ? {
 		complexity: classification.complexity,
 		workflow: classification.workflow,
-		kind: classification.signals.debugging ? "debugging" as const : classification.signals.architecture ? "architecture" as const : classification.signals.refactor ? "refactoring" as const : classification.complexity === "SIMPLE" ? "simple" as const : classification.complexity === "VERY_COMPLEX" ? "complex" as const : "normal" as const,
+		kind: classification.signals.debugging ? ("debugging" as const) : classification.signals.architecture ? ("architecture" as const) : classification.signals.refactor ? ("refactoring" as const) : classification.complexity === "SIMPLE" ? ("simple" as const) : classification.complexity === "VERY_COMPLEX" ? ("complex" as const) : ("normal" as const),
 	} : undefined;
 	return {
 		task,
-		phase: orchestration?.currentPhase as InstructionState["phase"],
+		phase: orchestration?.currentPhase,
 		lastAction: orchestration?.lastAction,
 		objective: orchestration?.currentObjective,
-		failure: failure ? {
+		failure: orchestration?.failure?.present ? {
 			present: true,
-			category: failure.category,
-			check: failure.check,
-			summary: failure.summary,
-			repeatCount: failure.repeatCount,
+			category: orchestration.failure.category,
+			check: orchestration.failure.check,
+			summary: orchestration.failure.summary,
+			repeatCount: orchestration.failure.repeatCount,
 		} : undefined,
-		verification: verification ? {
-			state: verification.state,
-			failureCategory: verification.failureCategory,
-			checksSelected: verification.checksSelected,
-			checksPassed: verification.checksPassed,
-			checksFailed: verification.checksFailed,
+		verification: orchestration?.verification ? {
+			state: orchestration.verification.state,
+			failureCategory: orchestration.verification.failureCategory,
+			checksSelected: orchestration.verification.checksSelected,
+			checksPassed: orchestration.verification.checksPassed,
+			checksFailed: orchestration.verification.checksFailed,
 		} : undefined,
-		model: modelInstructionState(agent.state.model ? deriveModelCapabilities(agent.state.model) : undefined),
+		contextPressure: orchestration?.context?.pressure,
+		model: modelInstructionState(orchestration?.modelCapabilities ?? deriveModelCapabilities(agent.state.model)),
 		toolNames: agent.state.tools.map(tool => tool.name),
 		specialistRole: specialistRoleFromState(state.specialistRole),
 	};
