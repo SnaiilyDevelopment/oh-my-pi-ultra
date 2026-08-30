@@ -11,8 +11,8 @@ import type { ResearchLocalEvidence, ResearchObjective, ResearchResult, Research
 
 interface SearchDetails { response?: SearchResponse; }
 
-function cacheKey(objective: ResearchObjective, query: string): string {
-	return JSON.stringify({ question: objective.question, version: objective.question.match(/\b\d+(?:\.\d+){0,2}\b/)?.[0] ?? null, query });
+function cacheKey(objective: ResearchObjective, query: string, version?: string): string {
+	return JSON.stringify({ question: objective.question, version: version ?? null, query });
 }
 
 function mapResponseSources(response: SearchResponse, objective: ResearchObjective, local?: ResearchLocalEvidence): ResearchSource[] {
@@ -25,6 +25,18 @@ function finalConfidence(result: ResearchResult): ResearchTelemetry["finalConfid
 	if (result.evidence.some(item => item.confidence === "high")) return "high";
 	if (result.evidence.some(item => item.confidence === "medium")) return "medium";
 	return "low";
+}
+
+function safeSource(source: ResearchSource): ResearchSource {
+	try {
+		const value = new URL(source.url);
+		value.username = "";
+		value.password = "";
+		for (const key of [...value.searchParams.keys()]) if (/key|token|secret|password|auth|cookie|session/i.test(key)) value.searchParams.set(key, "[REDACTED]");
+		return { ...source, title: sanitizeExternalText(source.title, 300), url: value.toString(), snippet: source.snippet ? sanitizeExternalText(source.snippet, 500) : undefined };
+	} catch {
+		return { ...source, title: sanitizeExternalText(source.title, 300), url: sanitizeExternalText(source.url, 500), snippet: source.snippet ? sanitizeExternalText(source.snippet, 500) : undefined };
+	}
 }
 
 export async function runAutonomousResearch(session: ToolSession, objective: ResearchObjective, local?: ResearchLocalEvidence, decision: ResearchDecision = objective.maxQueries > 2 ? "DEEP_RESEARCH" : "TARGETED_RESEARCH"): Promise<{ result: ResearchResult; telemetry: ResearchTelemetry }> {
@@ -44,7 +56,7 @@ export async function runAutonomousResearch(session: ToolSession, objective: Res
 		const query = sanitizeResearchQuery(queries[queryIndex]!);
 		if (!query || query === usedQuery) continue;
 		usedQuery = query;
-		const cached = await readResearchCache(cacheKey(objective, query));
+		const cached = await readResearchCache(cacheKey(objective, query, local?.version));
 		if (cached) {
 			cacheHits += 1;
 			return { result: cached, telemetry: { decision: cached.decision, requested: true, reason: "fresh research cache hit", queries: queryIndex + 1, sources: cached.sources.length, pagesRead: 0, researchTokens: 0, latencyMs: performance.now() - started, cacheHits, retries, conflicts: cached.conflicts.length, finalConfidence: finalConfidence(cached), changedStrategy: false, preventedError: false, unnecessaryCost: false } };
@@ -68,9 +80,8 @@ export async function runAutonomousResearch(session: ToolSession, objective: Res
 		if (pagesRead >= objective.maxPages || performance.now() - started > objective.maxElapsedTimeMs) break;
 		try {
 			const remaining = Math.max(1000, objective.maxElapsedTimeMs - Math.floor(performance.now() - started));
-			const page = await fetchReadUrl(session, { path: source.url }, AbortSignal.timeout(remaining), { ensureArtifact: true });
+			const page = await fetchReadUrl(session, { path: source.url }, AbortSignal.timeout(remaining));
 			pagesRead += 1;
-			if (page.artifactPath) fullSourceRefs.push(page.artifactPath);
 			evidence.push(extractEvidence(objective.question, source, page.content, local?.version));
 		} catch {
 			evidence.push(extractEvidence(objective.question, source, source.snippet ?? "", local?.version));
@@ -78,11 +89,12 @@ export async function runAutonomousResearch(session: ToolSession, objective: Res
 	}
 	const checked = crossCheckEvidence(evidence);
 	if (checked.verified.length === 0) {
-		const result: ResearchResult = { decision: "BLOCKED", objective, query: sanitizeResearchQuery(usedQuery || objective.question), evidence: [], sources, conflicts: checked.conflicts, compact: "Research retrieved sources but no usable evidence could be extracted.", fullSourceRefs, failure: "SOURCE_UNAVAILABLE" };
+		const result: ResearchResult = { decision: "BLOCKED", objective, query: sanitizeResearchQuery(usedQuery || objective.question), evidence: [], sources: sources.map(safeSource), conflicts: checked.conflicts, compact: "Research retrieved sources but no usable evidence could be extracted.", fullSourceRefs, failure: "SOURCE_UNAVAILABLE" };
 		return { result, telemetry: { decision: "BLOCKED", requested: true, reason: "source extraction produced no evidence", queries: queries.length, sources: sources.length, pagesRead, researchTokens, latencyMs: performance.now() - started, cacheHits, retries, conflicts: checked.conflicts.length, finalConfidence: "low", changedStrategy: false, preventedError: false, unnecessaryCost: false } };
 	}
-	const boundedEvidence = checked.verified.slice(0, objective.maxSources).map(item => ({ ...item, repositoryImplication: "Use this external evidence only for the unresolved fact; current repository tests and implementation remain authoritative for local behavior." }));
-	const result: ResearchResult = { decision, objective, query: sanitizeExternalText(usedQuery || objective.question, 500), evidence: boundedEvidence, sources: sources.slice(0, objective.maxSources), conflicts: checked.conflicts, compact: compactResearchResult(objective.question, boundedEvidence, checked.conflicts), fullSourceRefs };
-	await writeResearchCache(cacheKey(objective, usedQuery || objective.question), result).catch(() => undefined);
+	const safeSources = sources.map(safeSource).slice(0, objective.maxSources);
+	const boundedEvidence = checked.verified.slice(0, objective.maxSources).map(item => ({ ...item, source: safeSources.find(source => source.url === safeSource(item.source).url) ?? safeSource(item.source), repositoryImplication: "Use this external evidence only for the unresolved fact; current repository tests and implementation remain authoritative for local behavior." }));
+	const result: ResearchResult = { decision, objective, query: sanitizeExternalText(usedQuery || objective.question, 500), evidence: boundedEvidence, sources: safeSources, conflicts: checked.conflicts, compact: compactResearchResult(objective.question, boundedEvidence, checked.conflicts), fullSourceRefs };
+	await writeResearchCache(cacheKey(objective, usedQuery || objective.question, local?.version), result).catch(() => undefined);
 	return { result, telemetry: { decision: result.decision, requested: true, reason: "external evidence required by deterministic policy", queries: queries.length, sources: result.sources.length, pagesRead, researchTokens, latencyMs: performance.now() - started, cacheHits, retries, conflicts: result.conflicts.length, finalConfidence: finalConfidence(result), changedStrategy: result.conflicts.length > 0, preventedError: false, unnecessaryCost: false } };
 }
