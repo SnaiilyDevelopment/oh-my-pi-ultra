@@ -18,6 +18,11 @@ export * from "./run-collector";
 export * from "./telemetry";
 // Thinking selectors
 export * from "./thinking";
+// Adaptive deterministic task routing
+export * from "./task-router";
+export { getTaskRouting } from "./task-router-runtime";
+// Runtime router integration (patches Agent.prompt only; no parallel loop)
+import "./task-router-runtime";
 // Tokenizer choice
 export * from "./tokenizer";
 // Types
