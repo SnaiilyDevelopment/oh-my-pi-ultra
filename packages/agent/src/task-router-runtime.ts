@@ -4,6 +4,7 @@ import type { Effort } from "@oh-my-pi/pi-ai";
 import { Agent } from "./agent";
 import type { AgentMessage, AgentState } from "./types";
 import { assembleContext, contextBudgetForComplexity, type ContextIntelligenceTelemetry } from "./context-intelligence";
+import { getModelStrategy } from "./model-capability-runtime";
 import {
 	buildRepairMessage,
 	buildVerificationPlan,
@@ -82,8 +83,10 @@ function publish(agent: Agent, route: RuntimeRoute): void {
 }
 function adaptThinking(agent: Agent, route: RuntimeRoute): void {
 	if (agent.state.thinkingLevel !== undefined || route.autoThinking) return;
+	const strategy = getModelStrategy(agent);
+	if (strategy?.reasoningMode === "default") return;
 	route.autoThinking = true;
-	agent.setThinkingLevel(effort(route.tracker.current.complexity));
+	agent.setThinkingLevel(strategy?.reasoningMode ?? effort(route.tracker.current.complexity));
 }
 function attachContextIntelligence(agent: Agent, route: RuntimeRoute, task: string): void {
 	if (!contextEnabled()) return;
@@ -92,9 +95,10 @@ function attachContextIntelligence(agent: Agent, route: RuntimeRoute, task: stri
 		const model = agent.state.model as typeof agent.state.model & { contextWindow?: number };
 		const contextWindowTokens = typeof model.contextWindow === "number" ? model.contextWindow : undefined;
 		const explicitBudget = parsePositiveInteger(Bun.env.PI_CONTEXT_BUDGET);
+		const capabilityBudget = getModelStrategy(agent)?.contextBudget;
 		const assembled = assembleContext(task, context.messages, agent.tokenizer, {
 			complexity: route.tracker.current.complexity,
-			budgetTokens: explicitBudget ?? contextBudgetForComplexity(route.tracker.current.complexity, contextWindowTokens),
+			budgetTokens: explicitBudget ?? capabilityBudget ?? contextBudgetForComplexity(route.tracker.current.complexity, contextWindowTokens),
 			recentMessageCount: parsePositiveInteger(Bun.env.PI_CONTEXT_RECENT_MESSAGES),
 			contextWindowTokens,
 		});
@@ -128,7 +132,6 @@ function addBeforeYieldHook(agent: Agent, hook: YieldHook): () => void {
 	let record = yieldHooks.get(agent);
 	if (!record) { record = { extras: new Set() }; yieldHooks.set(agent, record); }
 	record.extras.add(hook);
-	// Re-install through the composed public setter so a host-owned primary hook remains active.
 	agent.setOnBeforeYield(record.primary);
 	return () => {
 		const current = yieldHooks.get(agent);
@@ -138,7 +141,6 @@ function addBeforeYieldHook(agent: Agent, hook: YieldHook): () => void {
 		if (!current.primary && current.extras.size === 0) yieldHooks.delete(agent);
 	};
 }
-
 async function workspaceSignature(cwd: string): Promise<string> {
 	try {
 		const result = await ptree.exec(["git", "status", "--porcelain", "--untracked-files=all"], { cwd, allowNonZero: true, allowAbort: true, stderr: "full" });
@@ -158,24 +160,13 @@ function changedFilesFromStatus(status: string): string[] {
 	return [...new Set(files)];
 }
 function blankTelemetry(): VerificationRuntimeTelemetry {
-	return {
-		plan: { risk: "low", scope: "single-file", checks: [], estimatedCost: "cheap", requiredEvidence: [], changedFiles: [], unexpectedFiles: [] },
-		checksSelected: 0, checksExecuted: 0, checksSkipped: 0, checksPassed: 0, checksFailed: 0, checkDurationsMs: {},
-		repairAttempts: 0, repairsModelCalls: 0, repairsToolCalls: 0, escalations: 0, finalState: "UNVERIFIED", workspaceChanged: false,
-	};
+	return { plan: { risk: "low", scope: "single-file", checks: [], estimatedCost: "cheap", requiredEvidence: [], changedFiles: [], unexpectedFiles: [] }, checksSelected: 0, checksExecuted: 0, checksSkipped: 0, checksPassed: 0, checksFailed: 0, checkDurationsMs: {}, repairAttempts: 0, repairsModelCalls: 0, repairsToolCalls: 0, escalations: 0, finalState: "UNVERIFIED", workspaceChanged: false };
 }
-
 async function attachVerification(agent: Agent, route: RuntimeRoute, task: string): Promise<void> {
 	if (!verificationEnabled()) return;
 	const cwd = process.cwd();
 	const baseline = await workspaceSignature(cwd);
-	const runtime: VerificationRuntime = {
-		controller: new VerificationRecoveryController({ maxSameFailureRepairs: parsePositiveInteger(Bun.env.PI_VERIFICATION_MAX_SAME_FAILURE) ?? 2, maxTotalRepairs: parsePositiveInteger(Bun.env.PI_VERIFICATION_MAX_REPAIRS) ?? 4 }),
-		baselineWorkspace: baseline,
-		pendingRecovery: false,
-		previousAttempts: [],
-		telemetry: blankTelemetry(),
-	};
+	const runtime: VerificationRuntime = { controller: new VerificationRecoveryController({ maxSameFailureRepairs: parsePositiveInteger(Bun.env.PI_VERIFICATION_MAX_SAME_FAILURE) ?? 2, maxTotalRepairs: parsePositiveInteger(Bun.env.PI_VERIFICATION_MAX_REPAIRS) ?? 4 }), baselineWorkspace: baseline, pendingRecovery: false, previousAttempts: [], telemetry: blankTelemetry() };
 	route.verification = runtime;
 	route.removeVerificationHook = addBeforeYieldHook(agent, async () => {
 		if (runtime.pendingRecovery) return;
@@ -193,29 +184,8 @@ async function attachVerification(agent: Agent, route: RuntimeRoute, task: strin
 		const key = `${route.tracker.current.complexity}|${changedFiles.join("|")}|${plan.checks.map(check => check.name).join("|")}`;
 		if (runtime.lastPlanKey === key && runtime.lastState === "VERIFIED_SUCCESS") return;
 		runtime.lastPlanKey = key;
-		const result = await executeVerificationPlan(plan, {
-			execute: async (check, signal) => {
-				const started = performance.now();
-				const execution = await ptree.exec([check.command, ...check.args], { cwd, signal, timeout: parsePositiveInteger(Bun.env.PI_VERIFICATION_TIMEOUT_MS) ?? 120_000, allowNonZero: true, allowAbort: true, stderr: "full" });
-				return { stdout: execution.stdout, stderr: execution.stderr, code: execution.exitCode ?? 0, killed: Boolean(execution.exitError?.aborted), durationMs: performance.now() - started };
-			},
-		});
-		runtime.telemetry = {
-			...runtime.telemetry,
-			plan: result.plan,
-			checksSelected: result.plan.checks.length,
-			checksExecuted: result.checks.filter(item => item.status !== "skipped").length,
-			checksSkipped: result.checks.filter(item => item.status === "skipped").length,
-			checksPassed: result.checks.filter(item => item.status === "passed").length,
-			checksFailed: result.checks.filter(item => item.status === "failed" || item.status === "blocked").length,
-			checkDurationsMs: Object.fromEntries(result.checks.map(item => [item.check.name, item.durationMs])),
-			failureCategory: result.failure?.category,
-			finalState: result.state,
-			workspaceChanged: true,
-			lastFailure: result.failure,
-			repairAttempts: runtime.controller.repairAttempts,
-			escalations: route.tracker.telemetry.escalations.length,
-		};
+		const result = await executeVerificationPlan(plan, { execute: async (check, signal) => { const started = performance.now(); const execution = await ptree.exec([check.command, ...check.args], { cwd, signal, timeout: parsePositiveInteger(Bun.env.PI_VERIFICATION_TIMEOUT_MS) ?? 120_000, allowNonZero: true, allowAbort: true, stderr: "full" }); return { stdout: execution.stdout, stderr: execution.stderr, code: execution.exitCode ?? 0, killed: Boolean(execution.exitError?.aborted), durationMs: performance.now() - started }; } });
+		runtime.telemetry = { ...runtime.telemetry, plan: result.plan, checksSelected: result.plan.checks.length, checksExecuted: result.checks.filter(item => item.status !== "skipped").length, checksSkipped: result.checks.filter(item => item.status === "skipped").length, checksPassed: result.checks.filter(item => item.status === "passed").length, checksFailed: result.checks.filter(item => item.status === "failed" || item.status === "blocked").length, checkDurationsMs: Object.fromEntries(result.checks.map(item => [item.check.name, item.durationMs])), failureCategory: result.failure?.category, finalState: result.state, workspaceChanged: true, lastFailure: result.failure, repairAttempts: runtime.controller.repairAttempts, escalations: route.tracker.telemetry.escalations.length };
 		runtime.lastState = result.state;
 		if (result.state !== "FAILED" || !result.failure) { publish(agent, route); return; }
 		const decision = runtime.controller.decide(result.failure, current, route.tracker);
@@ -230,7 +200,6 @@ async function attachVerification(agent: Agent, route: RuntimeRoute, task: strin
 		publish(agent, route);
 	});
 }
-
 function inspectTurn(agent: Agent, route: RuntimeRoute, resultText: string, toolFailed: boolean): void {
 	const text = resultText.slice(0, 12000);
 	if (!toolFailed && !isTaskFailureMessage(text)) { route.failures = 0; return; }
@@ -239,53 +208,25 @@ function inspectTurn(agent: Agent, route: RuntimeRoute, resultText: string, tool
 	if (escalation) adaptThinking(agent, route);
 	publish(agent, route);
 }
-
 async function attach(agent: Agent, task: string): Promise<RuntimeRoute> {
-	const previous = byAgent.get(agent);
-	previous?.unsubscribe();
-	previous?.removeContextHook();
-	previous?.removeVerificationHook();
+	const previous = byAgent.get(agent); previous?.unsubscribe(); previous?.removeContextHook(); previous?.removeVerificationHook();
 	const route: RuntimeRoute = { tracker: new TaskRouteTracker(classifyTask(task)), previousThinking: agent.state.thinkingLevel, autoThinking: false, unsubscribe: () => {}, removeContextHook: () => {}, removeVerificationHook: () => {}, failures: 0 };
 	route.unsubscribe = agent.subscribe(event => {
 		if (event.type === "turn_end") {
 			const results = event.toolResults as Array<{ content: unknown; isError?: boolean }>;
 			inspectTurn(agent, route, results.map(item => textOf(item.content)).join(" "), results.some(item => item.isError === true));
-			if (route.verification?.pendingRecovery) {
-				route.verification.pendingRecovery = false;
-				route.verification.telemetry = { ...route.verification.telemetry, repairsToolCalls: route.verification.telemetry.repairsToolCalls + results.length };
-			}
+			if (route.verification?.pendingRecovery) { route.verification.pendingRecovery = false; route.verification.telemetry = { ...route.verification.telemetry, repairsToolCalls: route.verification.telemetry.repairsToolCalls + results.length }; }
 		}
 		if (event.type === "agent_end") publish(agent, route);
 	});
-	byAgent.set(agent, route);
-	publish(agent, route);
-	adaptThinking(agent, route);
-	attachContextIntelligence(agent, route, task);
-	await attachVerification(agent, route, task);
-	return route;
+	byAgent.set(agent, route); publish(agent, route); adaptThinking(agent, route); attachContextIntelligence(agent, route, task); await attachVerification(agent, route, task); return route;
 }
-
 function patch(): void {
-	const target = Agent.prototype as Agent & { [key: symbol]: unknown };
-	if (target[kPatched]) return;
-	target[kPatched] = true;
-	patchYieldComposition();
+	const target = Agent.prototype as Agent & { [key: symbol]: unknown }; if (target[kPatched]) return; target[kPatched] = true; patchYieldComposition();
 	const original = Agent.prototype.prompt as (...args: unknown[]) => Promise<unknown>;
 	(target as any).prompt = async function routedPrompt(this: Agent, ...args: unknown[]) {
-		if (!enabled()) return original.apply(this, args);
-		const task = promptText(args[0]);
-		if (!task) return original.apply(this, args);
-		const route = await attach(this, task);
-		try { return await original.apply(this, args); }
-		finally {
-			publish(this, route);
-			route.unsubscribe();
-			route.removeContextHook();
-			route.removeVerificationHook();
-			if (route.previousThinking !== undefined) this.setThinkingLevel(route.previousThinking);
-			else if (route.autoThinking) this.setThinkingLevel(undefined);
-			byAgent.delete(this);
-		}
+		if (!enabled()) return original.apply(this, args); const task = promptText(args[0]); if (!task) return original.apply(this, args); const route = await attach(this, task);
+		try { return await original.apply(this, args); } finally { publish(this, route); route.unsubscribe(); route.removeContextHook(); route.removeVerificationHook(); if (route.previousThinking !== undefined) this.setThinkingLevel(route.previousThinking); else if (route.autoThinking) this.setThinkingLevel(undefined); byAgent.delete(this); }
 	};
 }
 patch();
