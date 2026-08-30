@@ -8,10 +8,10 @@ export function modelInstructionState(capabilities: ModelCapabilities | undefine
 	if (!capabilities) return undefined;
 	const known = (value: boolean | undefined): "supported" | "unsupported" | "unknown" => value === undefined ? "unknown" : value ? "supported" : "unsupported";
 	return {
-		structuredOutput: known(capabilities.structuredOutput),
-		toolCalling: known(capabilities.toolCalling),
-		parallelToolCalls: known(capabilities.parallelToolCalls),
-		promptCaching: known(capabilities.promptCaching),
+		structuredOutput: known(capabilities.structuredOutput === "supported" ? true : capabilities.structuredOutput === "unsupported" ? false : undefined),
+		toolCalling: known(capabilities.toolCalling === "supported" ? true : capabilities.toolCalling === "unsupported" ? false : undefined),
+		parallelToolCalls: known(capabilities.parallelToolCalls === "supported" ? true : capabilities.parallelToolCalls === "unsupported" ? false : undefined),
+		promptCaching: known(capabilities.promptCaching === "supported" ? true : capabilities.promptCaching === "unsupported" ? false : undefined),
 	};
 }
 
@@ -22,7 +22,10 @@ export function specialistRoleFromState(value: unknown): SpecialistInstructionRo
 }
 
 export function instructionStateFromAgent(agent: Agent, classification?: TaskClassification): InstructionState {
-	const state = agent.state as typeof agent.state & { orchestration?: OrchestrationState; specialistRole?: unknown };
+	const state = agent.state as typeof agent.state & {
+		orchestration?: OrchestrationState;
+		specialistOrchestration?: { activeRoles?: unknown[] };
+	};
 	const orchestration = state.orchestration;
 	const task = classification ? {
 		complexity: classification.complexity,
@@ -34,23 +37,11 @@ export function instructionStateFromAgent(agent: Agent, classification?: TaskCla
 		phase: orchestration?.currentPhase,
 		lastAction: orchestration?.lastAction,
 		objective: orchestration?.currentObjective,
-		failure: orchestration?.failure?.present ? {
-			present: true,
-			category: orchestration.failure.category,
-			check: orchestration.failure.check,
-			summary: orchestration.failure.summary,
-			repeatCount: orchestration.failure.repeatCount,
-		} : undefined,
-		verification: orchestration?.verification ? {
-			state: orchestration.verification.state,
-			failureCategory: orchestration.verification.failureCategory,
-			checksSelected: orchestration.verification.checksSelected,
-			checksPassed: orchestration.verification.checksPassed,
-			checksFailed: orchestration.verification.checksFailed,
-		} : undefined,
+		failure: orchestration?.failure?.present ? { present: true, category: orchestration.failure.category, check: orchestration.failure.check, summary: orchestration.failure.summary, repeatCount: orchestration.failure.repeatCount } : undefined,
+		verification: orchestration?.verification ? { state: orchestration.verification.state, failureCategory: orchestration.verification.failureCategory, checksSelected: orchestration.verification.checksSelected, checksPassed: orchestration.verification.checksPassed, checksFailed: orchestration.verification.checksFailed } : undefined,
 		contextPressure: orchestration?.context?.pressure,
 		model: modelInstructionState(orchestration?.modelCapabilities ?? deriveModelCapabilities(agent.state.model)),
 		toolNames: agent.state.tools.map(tool => tool.name),
-		specialistRole: specialistRoleFromState(state.specialistRole),
+		specialistRole: specialistRoleFromState(state.specialistOrchestration?.activeRoles?.[0]),
 	};
 }
