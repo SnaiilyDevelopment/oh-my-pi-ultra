@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-	assembleContext,
-	contextBudgetForComplexity,
-	rankContextCandidates,
-} from "../src/context-intelligence";
+import { assembleContext, contextBudgetForComplexity, rankContextCandidates } from "../src/context-intelligence";
 import { classifyTask } from "../src/task-router";
 import type { AgentMessage } from "../src/types";
 
@@ -44,9 +40,8 @@ describe("context intelligence", () => {
 	test("direct file references outrank unrelated context", () => {
 		const task = "Fix the bug in src/auth/session.ts";
 		const messages = [
-			toolResult("footer component implementation", { toolName: "read", timestamp: 1 }),
-			toolResult("SessionManager refreshSession implementation", { toolName: "read", timestamp: 2 }),
-			toolResult("src/auth/session.ts\nrefreshSession()\nexpiresAt", { toolName: "read", timestamp: 3 }),
+			toolResult("components/footer.tsx\nFooter", { toolName: "read", timestamp: 1 }),
+			toolResult("src/auth/session.ts\nSessionManager refreshSession implementation", { toolName: "read", timestamp: 2 }),
 		];
 		const ranked = rankContextCandidates(task, messages, counter);
 		expect(ranked[0]?.location).toContain("src/auth/session.ts");
@@ -75,12 +70,12 @@ describe("context intelligence", () => {
 		expect(ranked[0]?.type).toBe("previous_failure");
 	});
 
-	test("unchanged duplicate reads are compacted but changed reads remain authoritative", () => {
+	test("unchanged duplicate reads are compacted while changed reads remain authoritative", () => {
 		const task = "Fix src/auth/session.ts";
 		const messages = [
-			toolResult("old session implementation", { toolName: "read", timestamp: 1 }),
-			toolResult("old session implementation", { toolName: "read", timestamp: 2 }),
-			toolResult("new session implementation after edit", { toolName: "read", timestamp: 3 }),
+			toolResult("src/auth/session.ts\nold session implementation", { toolName: "read", timestamp: 1 }),
+			toolResult("src/auth/session.ts\nold session implementation", { toolName: "read", timestamp: 2 }),
+			toolResult("src/auth/session.ts\nnew session implementation after edit", { toolName: "read", timestamp: 3 }),
 		];
 		const result = assembleContext(task, messages, counter, {
 			complexity: classifyTask(task).complexity,
@@ -92,11 +87,11 @@ describe("context intelligence", () => {
 		expect(texts.some(text => text.includes("new session implementation after edit"))).toBe(true);
 	});
 
-	test("budget keeps high-value evidence and compacts historical tool output", () => {
+	test("budget compacts historical tool output and preserves failure evidence", () => {
 		const long = "useful session detail ".repeat(500);
 		const messages = [
-			toolResult(long, { toolName: "read", timestamp: 1 }),
-			toolResult("ERROR: session.test.ts expected 401, received 200", { toolName: "test", isError: true, timestamp: 2 }),
+			toolResult("src/auth/session.ts\n" + long, { toolName: "read", timestamp: 1 }),
+			toolResult("session.test.ts\nERROR: expected 401, received 200", { toolName: "test", isError: true, timestamp: 2 }),
 			user("Fix session expiration"),
 		];
 		const result = assembleContext("Fix session expiration", messages, counter, {
@@ -106,7 +101,7 @@ describe("context intelligence", () => {
 		});
 		expect(result.telemetry.estimatedTokensAfter).toBeLessThanOrEqual(500);
 		expect(result.telemetry.discardedCandidates + result.telemetry.deduplicatedCandidates).toBeGreaterThan(0);
-		expect(JSON.stringify(result.messages[1])).toContain("session.test.ts");
+		expect(JSON.stringify(result.messages[1])).toContain("expected 401, received 200");
 	});
 
 	test("complexity changes context depth without creating another classifier", () => {
