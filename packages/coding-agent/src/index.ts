@@ -35,13 +35,14 @@ export * from "./session/session-dump-format";
 export * from "./session/session-entries";
 export * from "./session/session-listing";
 export * from "./session/session-loader";
-export * from "./session/session-manager";
 export * from "./session/session-migrations";
 export * from "./session/session-storage";
 export * from "./task/executor";
 export type * from "./task/types";
 export { getSpecialistOrchestration } from "./task/specialist-orchestration-runtime";
 export * from "./benchmark";
+export * from "./instructions";
+export { getInstructionTelemetry, refreshDynamicInstructions, activeSpecialistRole } from "./instructions/runtime";
 export * from "./tools";
 export * from "./utils/github";
 export {
@@ -50,3 +51,4 @@ export {
 	HookSelectorComponent as ExtensionSelectorComponent,
 };
 import "./task/specialist-orchestration-runtime";
+import "./instructions/runtime";
