@@ -1,5 +1,4 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Effort } from "@oh-my-pi/pi-ai";
 import { Agent } from "./agent";
 import type { AgentMessage, AgentState } from "./types";
 import {
@@ -9,7 +8,7 @@ import {
 	type RepositoryProfile,
 } from "./repository-intelligence";
 import { setRepositoryProfileForVerification } from "./verification";
-import { classifyTask, withTaskRepositorySignals, type TaskClassification, type TaskRepositorySignals, type TaskComplexity } from "./task-router";
+import { classifyTask, type TaskClassification, type TaskRepositorySignals, type TaskComplexity, withTaskRepositorySignals } from "./task-router";
 
 const kPromptPatched = Symbol.for("oh-my-pi-ultra.repository-intelligence.prompt-patched");
 const kYieldPatched = Symbol.for("oh-my-pi-ultra.repository-intelligence.yield-patched");
@@ -51,18 +50,18 @@ function complexityRank(complexity: TaskComplexity): number {
 	return complexity === "SIMPLE" ? 0 : complexity === "NORMAL" ? 1 : complexity === "COMPLEX" ? 2 : 3;
 }
 
-function effort(complexity: TaskComplexity): Effort {
-	return complexity === "SIMPLE" ? ("minimal" as Effort) : complexity === "NORMAL" ? ("low" as Effort) : complexity === "COMPLEX" ? ("high" as Effort) : ("max" as Effort);
+function repositoryFactsMessage(facts: string): AgentMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text: `[Repository Intelligence]\n${facts}` }],
+		timestamp: Date.now(),
+	} as AgentMessage;
 }
 
-function publish(agent: Agent, runtime: RepositoryRuntime, signals?: TaskRepositorySignals): void {
-	const state = agent.state as RoutedState;
-	state.repositoryIntelligence = {
-		profile: runtime.profile,
-		telemetry: runtime.index.telemetry,
-		initialTaskClassification: runtime.initial,
-		repositorySignals: signals,
-	};
+function shouldIndex(initial: TaskClassification): boolean {
+	const confidenceThreshold = Number.parseFloat(Bun.env.PI_REPOSITORY_CONFIDENCE_THRESHOLD ?? "0.78");
+	const threshold = Number.isFinite(confidenceThreshold) ? confidenceThreshold : 0.78;
+	return complexityRank(initial.complexity) > 0 || initial.confidence < threshold;
 }
 
 function patchYieldComposition(): void {
@@ -106,24 +105,8 @@ function addBeforeYieldHook(agent: Agent, hook: () => Promise<void> | void): () 
 	};
 }
 
-function repositoryMessage(facts: string): AgentMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text: `[Repository Intelligence]\n${facts}` }],
-		timestamp: Date.now(),
-	} as AgentMessage;
-}
-
-function shouldIndex(initial: TaskClassification): boolean {
-	const confidenceThreshold = Number.parseFloat(Bun.env.PI_REPOSITORY_CONFIDENCE_THRESHOLD ?? "0.78");
-	const threshold = Number.isFinite(confidenceThreshold) ? confidenceThreshold : 0.78;
-	return complexityRank(initial.complexity) > 0 || initial.confidence < threshold;
-}
-
-async function attach(agent: Agent, task: string): Promise<RepositoryRuntime | undefined> {
-	const initial = classifyTask(task);
+async function attach(agent: Agent, task: string, initial: TaskClassification): Promise<RepositoryRuntime | undefined> {
 	if (!shouldIndex(initial)) return undefined;
-
 	const existing = repositoryByAgent.get(agent);
 	existing?.removeContextHook();
 	existing?.removeVerificationProfile();
@@ -134,22 +117,13 @@ async function attach(agent: Agent, task: string): Promise<RepositoryRuntime | u
 		maxIndexedFiles: parsePositiveInteger(Bun.env.PI_REPOSITORY_MAX_FILES) ?? 20_000,
 		cache: Bun.env.PI_REPOSITORY_CACHE !== "0",
 	});
-	const runtime: RepositoryRuntime = {
-		index,
-		initial,
-		removeContextHook: () => {},
-		removeVerificationProfile: () => {},
-		removeYieldHook: () => {},
-	};
-
+	const runtime: RepositoryRuntime = { index, initial, removeContextHook: () => {}, removeVerificationProfile: () => {}, removeYieldHook: () => {} };
 	try {
-		const profile = await index.refresh("auto");
-		runtime.profile = profile;
+		runtime.profile = await index.refresh("auto");
 	} catch (error) {
-		const state = agent.state as RoutedState;
-		state.repositoryIntelligence = {
-			profile: undefined,
-			telemetry: { ...index.telemetry, fallbacks: [...index.telemetry.fallbacks, error instanceof Error ? error.message : String(error)] },
+		const telemetry = index.telemetry;
+		(agent.state as RoutedState).repositoryIntelligence = {
+			telemetry: { ...telemetry, fallbacks: [...telemetry.fallbacks, error instanceof Error ? error.message : String(error)] },
 			initialTaskClassification: initial,
 		};
 		repositoryByAgent.set(agent, runtime);
@@ -157,32 +131,34 @@ async function attach(agent: Agent, task: string): Promise<RepositoryRuntime | u
 	}
 
 	const signals = index.getTaskRepositorySignals(task);
-	runtime.removeVerificationProfile = setRepositoryProfileForVerification(process.cwd(), profile);
+	runtime.removeVerificationProfile = setRepositoryProfileForVerification(process.cwd(), runtime.profile);
 	runtime.removeContextHook = agent.addBeforeModelCall(async context => {
-		const complexity = initial.complexity;
-		const facts = index.getRelevantFacts(task, complexity);
+		const facts = index.getRelevantFacts(task, initial.complexity);
 		if (!facts) return;
 		const marker = "[Repository Intelligence]";
-		if (context.messages.some(message => {
+		const present = context.messages.some(message => {
 			const value = (message as unknown as { content?: unknown }).content;
-			return typeof value === "string" ? value.startsWith(marker) : Array.isArray(value) && value.some(block => block && typeof block === "object" && "text" in block && String((block as { text: unknown }).text).startsWith(marker));
-		})) return;
-		context.messages = [repositoryMessage(facts), ...context.messages];
+			if (typeof value === "string") return value.startsWith(marker);
+			return Array.isArray(value) && value.some(block => block && typeof block === "object" && "text" in block && String((block as { text: unknown }).text).startsWith(marker));
+		});
+		if (!present) context.messages = [repositoryFactsMessage(facts), ...context.messages];
 	});
 
 	if (complexityRank(initial.complexity) >= 2) {
-		runtime.removeYieldHook = addBeforeYieldHook(agent, async () => {
-			if (!runtime.profile) return;
-			// Keep the cached map warm for long-running sessions without forcing a
-			// full refresh on every turn. A subsequent dirty workspace is refreshed
-			// by the next prompt's repository instance.
-			publish(agent, runtime, signals);
-		});
+		runtime.removeYieldHook = addBeforeYieldHook(agent, () => publish(agent, runtime, signals));
 	}
-
 	publish(agent, runtime, signals);
 	repositoryByAgent.set(agent, runtime);
 	return runtime;
+}
+
+function publish(agent: Agent, runtime: RepositoryRuntime, signals?: TaskRepositorySignals): void {
+	(agent.state as RoutedState).repositoryIntelligence = {
+		profile: runtime.profile,
+		telemetry: runtime.index.telemetry,
+		initialTaskClassification: runtime.initial,
+		repositorySignals: signals,
+	};
 }
 
 function patch(): void {
@@ -195,14 +171,13 @@ function patch(): void {
 		if (!enabled()) return original.apply(this, args);
 		const task = typeof args[0] === "string" ? args[0].trim() : undefined;
 		if (!task) return original.apply(this, args);
-		const preliminary = classifyTask(task);
-		if (!shouldIndex(preliminary)) return original.apply(this, args);
-		const runtime = await attach(this, task);
+		const initial = classifyTask(task);
+		if (!shouldIndex(initial)) return original.apply(this, args);
+		const runtime = await attach(this, task, initial);
 		if (!runtime?.profile) return original.apply(this, args);
 		const signals = runtime.index.getTaskRepositorySignals(task);
-		this.setThinkingLevel(this.state.thinkingLevel === undefined ? effort(signals.crossesSubsystems ? "COMPLEX" : preliminary.complexity) : this.state.thinkingLevel);
 		try {
-			return await signalStorage.run(signals, () => original.apply(this, args));
+			return await withTaskRepositorySignals(signals, () => original.apply(this, args));
 		} finally {
 			publish(this, runtime, signals);
 			runtime.removeContextHook();
