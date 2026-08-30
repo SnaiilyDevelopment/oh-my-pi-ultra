@@ -5,5 +5,6 @@ export * from "./security";
 export * from "./sources";
 export * from "./extract";
 export * from "./cache";
+export * from "./orchestration";
 export * from "./engine";
 export { ResearchTool, researchSchema } from "./tool";
