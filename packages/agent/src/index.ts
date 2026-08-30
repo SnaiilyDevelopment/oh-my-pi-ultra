@@ -10,6 +10,8 @@ export * from "./context-intelligence";
 export * from "./repository-intelligence";
 // Tool intelligence and high-signal execution projection
 export * from "./tool-intelligence";
+// Model capability and adaptive strategy
+export * from "./model-capability";
 // Verification and bounded recovery
 export * from "./verification";
 // Compaction
@@ -31,9 +33,11 @@ export * from "./task-router";
 export { getContextIntelligence, getTaskRouting, getVerification } from "./task-router-runtime";
 export { getRepositoryIntelligence } from "./repository-intelligence-runtime";
 export { getToolIntelligence } from "./tool-intelligence-runtime";
+export { currentCapabilityProfile, effectiveVerificationDepth, getModelCapabilities, getModelStrategy, shouldUseParallelTools } from "./model-capability-runtime";
 // Runtime integrations. Ordering is intentional: tool projection must run before
-// Context Intelligence so Task 02 ranks the signal-first representation.
+// Context Intelligence, then capability strategy before the existing Task Router.
 import "./tool-intelligence-runtime";
+import "./model-capability-runtime";
 import "./task-router-runtime";
 import "./repository-intelligence-runtime";
 // Tokenizer choice
