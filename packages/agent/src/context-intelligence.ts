@@ -8,7 +8,6 @@
 
 import type { AgentMessage } from "./types";
 import type { TaskComplexity } from "./task-router";
-import type { Tokenizer } from "./tokenizer";
 
 export type ContextCandidateType =
 	| "file"
@@ -41,13 +40,9 @@ export interface ContextCandidate {
 }
 
 export interface ContextBudgetOptions {
-	/** Explicit budget for managed historical tool-result content. */
 	budgetTokens?: number;
-	/** Optional model context window used to derive a budget when no explicit budget is set. */
 	contextWindowTokens?: number;
-	/** Existing Task Router complexity; no second classifier is performed. */
 	complexity: TaskComplexity;
-	/** Recent messages are considered active context and receive a strong priority boost. */
 	recentMessageCount?: number;
 }
 
@@ -106,7 +101,7 @@ function textOfContent(content: unknown): string {
 }
 
 function messageText(message: AgentMessage): string {
-	const value = message as Record<string, unknown>;
+	const value = message as unknown as Record<string, unknown>;
 	const content = textOfContent(value.content);
 	const toolCalls = Array.isArray(value.toolCalls)
 		? value.toolCalls.map(call => {
@@ -140,17 +135,16 @@ function extractMentions(task: string): { files: string[]; symbols: string[] } {
 }
 
 function pathOf(message: AgentMessage): string | undefined {
-	const value = message as Record<string, unknown>;
+	const value = message as unknown as Record<string, unknown>;
 	for (const key of ["path", "filePath", "file", "source", "location"]) {
 		const candidate = value[key];
 		if (typeof candidate === "string" && /[\\/]/.test(candidate)) return candidate;
 	}
-	const text = messageText(message);
-	return extractMentions(text).files[0];
+	return extractMentions(messageText(message)).files[0];
 }
 
 function toolNameOf(message: AgentMessage): string | undefined {
-	const value = message as Record<string, unknown>;
+	const value = message as unknown as Record<string, unknown>;
 	return typeof value.toolName === "string" ? value.toolName : undefined;
 }
 
@@ -159,7 +153,7 @@ function isToolResult(message: AgentMessage): boolean {
 }
 
 function isFailure(message: AgentMessage): boolean {
-	const value = message as Record<string, unknown>;
+	const value = message as unknown as Record<string, unknown>;
 	return value.isError === true || ERROR_RE.test(messageText(message));
 }
 
@@ -173,27 +167,28 @@ function isConfig(message: AgentMessage): boolean {
 }
 
 function isArchitecture(message: AgentMessage): boolean {
-	return ARCH_RE.test(messageText(message)) || isConfig(message) && ARCH_RE.test(pathOf(message) ?? "");
+	return ARCH_RE.test(messageText(message)) || (isConfig(message) && ARCH_RE.test(pathOf(message) ?? ""));
 }
 
 function timestampOf(message: AgentMessage, index: number, total: number): number {
 	const timestamp = (message as { timestamp?: unknown }).timestamp;
-	if (typeof timestamp === "number") return Math.max(0, Math.min(1, timestamp / Math.max(Date.now(), 1)));
+	if (typeof timestamp === "number" && timestamp > 0) return Math.min(1, timestamp / Math.max(Date.now(), timestamp));
 	return total <= 1 ? 1 : index / (total - 1);
 }
 
 function overlapScore(taskTokens: readonly string[], text: string): number {
 	if (taskTokens.length === 0) return 0;
+	const lower = text.toLowerCase();
 	const haystack = new Set(text.split(/\s+/).map(normalizeTerm).filter(Boolean));
 	let hits = 0;
 	for (const token of taskTokens) {
 		if (haystack.has(token)) hits++;
-		else if (text.toLowerCase().includes(token)) hits += 0.5;
+		else if (lower.includes(token)) hits += 0.5;
 	}
 	return Math.min(1, hits / Math.min(taskTokens.length, 8));
 }
 
-function directScore(task: string, candidateText: string, location: string | undefined, mentions: { files: string[]; symbols: string[] }): number {
+function directScore(candidateText: string, location: string | undefined, mentions: { files: string[]; symbols: string[] }): number {
 	const lower = candidateText.toLowerCase();
 	let score = 0;
 	for (const file of mentions.files) {
@@ -250,14 +245,9 @@ function compactText(text: string, maxChars: number): string {
 }
 
 function compactContent(message: AgentMessage, maxChars: number): AgentMessage {
-	const text = compactText(textOfContent((message as Record<string, unknown>).content), maxChars);
+	const text = compactText(textOfContent((message as unknown as { content?: unknown }).content), maxChars);
 	const suffix = isFailure(message) ? "\n[Failure evidence preserved]" : "";
 	return cloneWithContent(message, [{ type: "text", text: `${text}${suffix}` }]);
-}
-
-function fingerprint(message: AgentMessage): string {
-	const text = messageText(message).replace(/\s+/g, " ").trim();
-	return `${pathOf(message) ?? ""}|${toolNameOf(message) ?? ""}|${text}`;
 }
 
 function isChangedDuplicate(previous: ContextCandidate, current: ContextCandidate): boolean {
@@ -276,7 +266,6 @@ function rankCandidate(candidate: ContextCandidate): number {
 }
 
 export function rankContextCandidates(task: string, messages: readonly AgentMessage[], tokenizer: TokenCounter): ContextCandidate[] {
-	const started = performance.now();
 	const mentions = extractMentions(task);
 	const terms = taskTerms(task);
 	const candidates: ContextCandidate[] = [];
@@ -287,7 +276,7 @@ export function rankContextCandidates(task: string, messages: readonly AgentMess
 		const content = messageText(message);
 		if (!content && !pathOf(message)) continue;
 		const location = pathOf(message);
-		const direct = directScore(task, content, location, mentions);
+		const direct = directScore(content, location, mentions);
 		const semantic = overlapScore(terms, `${location ?? ""} ${content}`);
 		const freshness = timestampOf(message, index, messages.length);
 		const recentBoost = last === 0 ? 1 : index / last;
@@ -337,7 +326,6 @@ export function rankContextCandidates(task: string, messages: readonly AgentMess
 		}
 	}
 
-	// Same diagnostic/search content can repeat without a stable location.
 	const contentOwner = new Map<string, ContextCandidate>();
 	for (const candidate of candidates) {
 		const key = `${candidate.type}|${candidate.content.replace(/\s+/g, " ").trim()}`;
@@ -349,7 +337,6 @@ export function rankContextCandidates(task: string, messages: readonly AgentMess
 		}
 	}
 
-	void started;
 	return candidates.sort((a, b) => b.priority - a.priority);
 }
 
@@ -361,10 +348,6 @@ function budgetedToolResultTokens(messages: readonly AgentMessage[], tokenizer: 
 	let total = 0;
 	for (const message of messages) if (isToolResult(message)) total += tokenizer.countMessage(message);
 	return total;
-}
-
-function allToolResultsInBudget(messages: readonly AgentMessage[], tokenizer: TokenCounter, budget: number): boolean {
-	return budgetedToolResultTokens(messages, tokenizer) <= budget;
 }
 
 /**
@@ -405,7 +388,7 @@ export function assembleContext(
 	let managedTokens = budgetedToolResultTokens(result, tokenizer);
 	if (managedTokens > budget) {
 		const toolCandidates = candidates
-			.filter(candidate => byId.has(candidate.id) && candidate.type !== "message" && candidate.tokenCost > 0 && candidate.priority >= 0)
+			.filter(candidate => byId.has(candidate.id) && candidate.tokenCost > 0 && candidate.priority >= 0)
 			.filter(candidate => !candidate.duplicateOf)
 			.sort((a, b) => a.priority - b.priority);
 
@@ -426,8 +409,6 @@ export function assembleContext(
 		}
 	}
 
-	// A final hard pass ensures the budget is honored whenever there are enough
-	// historical tool results to compact. High-value failures are shrunk rather than removed.
 	if (managedTokens > budget) {
 		for (let i = 0; i < result.length && managedTokens > budget; i++) {
 			const message = result[i];
@@ -438,6 +419,7 @@ export function assembleContext(
 			const nextTokens = tokenizer.countMessage(compacted);
 			result[i] = compacted;
 			managedTokens -= Math.max(0, currentTokens - nextTokens);
+			if (nextTokens < currentTokens) discardedCandidates++;
 		}
 	}
 
