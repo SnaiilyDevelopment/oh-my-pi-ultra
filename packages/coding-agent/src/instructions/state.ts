@@ -1,6 +1,7 @@
 import type { Agent, ModelCapabilities, OrchestrationState, TaskClassification } from "@oh-my-pi/pi-agent-core";
 import { deriveModelCapabilities } from "@oh-my-pi/pi-agent-core";
-import type { InstructionModelState, InstructionState, SpecialistInstructionRole } from "./types";
+import { researchDecision } from "../research/policy";
+import type { InstructionModelState, InstructionState, ResearchInstructionDecision, SpecialistInstructionRole } from "./types";
 
 const ROLES = ["EXPLORER", "ARCHITECT", "DEBUGGER", "TEST_ENGINEER", "REVIEWER", "SECURITY_REVIEWER", "RESEARCHER"] as const;
 
@@ -21,6 +22,14 @@ export function specialistRoleFromState(value: unknown): SpecialistInstructionRo
 	return ROLES.includes(normalized as (typeof ROLES)[number]) ? normalized : undefined;
 }
 
+function userTaskText(agent: Agent): string {
+	return agent.state.messages
+		.filter(message => message.role === "user")
+		.map(message => typeof message.content === "string" ? message.content : "")
+		.filter(Boolean)
+		.join("\n");
+}
+
 export function instructionStateFromAgent(agent: Agent, classification?: TaskClassification): InstructionState {
 	const state = agent.state as typeof agent.state & {
 		orchestration?: OrchestrationState;
@@ -32,6 +41,9 @@ export function instructionStateFromAgent(agent: Agent, classification?: TaskCla
 		workflow: classification.workflow,
 		kind: classification.signals.debugging ? ("debugging" as const) : classification.signals.architecture ? ("architecture" as const) : classification.signals.refactor ? ("refactoring" as const) : classification.complexity === "SIMPLE" ? ("simple" as const) : classification.complexity === "VERY_COMPLEX" ? ("complex" as const) : ("normal" as const),
 	} : undefined;
+	const taskText = orchestration?.task ?? userTaskText(agent);
+	const research: ResearchInstructionDecision = taskText ? researchDecision(taskText, classification, undefined, orchestration) : "NO_RESEARCH";
+	const untrustedContentPresent = agent.state.messages.some(message => typeof message.content === "string" && message.content.includes("[UNTRUSTED EXTERNAL CONTENT]"));
 	return {
 		task,
 		phase: orchestration?.currentPhase,
@@ -43,5 +55,7 @@ export function instructionStateFromAgent(agent: Agent, classification?: TaskCla
 		model: modelInstructionState(orchestration?.modelCapabilities ?? deriveModelCapabilities(agent.state.model)),
 		toolNames: agent.state.tools.map(tool => tool.name),
 		specialistRole: specialistRoleFromState(state.specialistOrchestration?.activeRoles?.[0]),
+		researchDecision: research,
+		untrustedContentPresent,
 	};
 }
