@@ -6,6 +6,8 @@ export * from "./agent-loop";
 export * from "./append-only-context";
 // Context intelligence
 export * from "./context-intelligence";
+// Repository intelligence and incremental project mapping
+export * from "./repository-intelligence";
 // Verification and bounded recovery
 export * from "./verification";
 // Compaction
@@ -25,8 +27,10 @@ export * from "./thinking";
 // Adaptive deterministic task routing
 export * from "./task-router";
 export { getContextIntelligence, getTaskRouting, getVerification } from "./task-router-runtime";
-// Runtime router + context + verification integration (single existing agent loop)
+export { getRepositoryIntelligence } from "./repository-intelligence-runtime";
+// Runtime router + context + verification + repository intelligence integration
 import "./task-router-runtime";
+import "./repository-intelligence-runtime";
 // Tokenizer choice
 export * from "./tokenizer";
 // Types

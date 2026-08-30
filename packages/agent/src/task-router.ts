@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 /** Cheap, deterministic task routing for OMP Ultra. No model calls, I/O, or provider assumptions. */
 
 export const TASK_COMPLEXITIES = ["SIMPLE", "NORMAL", "COMPLEX", "VERY_COMPLEX"] as const;
@@ -89,6 +91,16 @@ export interface TaskRoutingBenchmarkRecord {
 	taskSuccess?: boolean;
 }
 
+const repositorySignalStorage = new AsyncLocalStorage<TaskRepositorySignals>();
+
+export function withTaskRepositorySignals<T>(signals: TaskRepositorySignals, callback: () => T): T {
+	return repositorySignalStorage.run(signals, callback);
+}
+
+export function getImplicitTaskRepositorySignals(): TaskRepositorySignals | undefined {
+	return repositorySignalStorage.getStore();
+}
+
 const TEST = /\btests?|test suite|coverage|specs?\b/i;
 const BUG = /\bbug\b|\bbroken\b|\bcrash(?:es)?\b|\bfix\b/i;
 const DEBUG = /\bdebug(?:ging)?\b|\binvestigate\b|\breproduce\b|\brepro\b|\broot cause\b/i;
@@ -162,9 +174,10 @@ function confidence(score: number, s: TaskClassifierSignals, c: TaskComplexity):
 
 export function classifyTask(text: string, repository?: TaskRepositorySignals): TaskClassification {
 	const value = text.replace(/\s+/g, " ").trim();
+	const effectiveRepository = repository ?? getImplicitTaskRepositorySignals();
 	const s: TaskClassifierSignals = {
 		requestedOutcomes: estimateOutcomes(value),
-		likelyFiles: estimateFiles(value, repository),
+		likelyFiles: estimateFiles(value, effectiveRepository),
 		bugFix: BUG.test(value),
 		debugging: DEBUG.test(value),
 		architecture: ARCH.test(value),
@@ -173,11 +186,11 @@ export function classifyTask(text: string, repository?: TaskRepositorySignals): 
 		migration: MIGRATION.test(value),
 		explicitTests: TEST.test(value),
 		externalResearch: RESEARCH.test(value),
-		crossSubsystem: CROSS.test(value) || repository?.crossesSubsystems === true,
-		uncertain: repository?.knownUncertainty === true || /\b(maybe|unclear|not sure|figure out|mystery)\b/i.test(value),
+		crossSubsystem: CROSS.test(value) || effectiveRepository?.crossesSubsystems === true,
+		uncertain: effectiveRepository?.knownUncertainty === true || /\b(maybe|unclear|not sure|figure out|mystery)\b/i.test(value),
 	};
 	const simple = SIMPLE.test(value);
-	const score = scoreFor(s, repository) - (simple ? 1.6 : 0);
+	const score = scoreFor(s, effectiveRepository) - (simple ? 1.6 : 0);
 	let complexity = fromScore(score, s);
 	if (simple && s.requestedOutcomes === 1 && !s.debugging && !s.refactor && !s.migration && !s.crossSubsystem && !s.architecture) complexity = "SIMPLE";
 	const rawConfidence = confidence(score, s, complexity);
