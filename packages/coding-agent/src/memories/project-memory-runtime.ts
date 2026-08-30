@@ -1,24 +1,6 @@
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import {
-	classifyTask,
-	createStrategyProfile,
-	deriveModelCapabilities,
-	getRepositoryIntelligence,
-	getVerification,
-	Agent,
-	type AgentMessage,
-	type AgentState,
-} from "@oh-my-pi/pi-agent-core";
-import {
-	MemoryCategory,
-	MemoryCandidate,
-	MemoryScope,
-	ProjectMemoryStore,
-	MemoryTelemetry,
-	projectFingerprint,
-	projectMemoryFilePath,
-	renderProjectMemory,
-} from "./project-memory";
+import { classifyTask, createStrategyProfile, deriveModelCapabilities, getRepositoryIntelligence, getVerification, Agent, type AgentMessage, type AgentState } from "@oh-my-pi/pi-agent-core";
+import { MemoryCategory, MemoryCandidate, MemoryScope, ProjectMemoryStore, MemoryTelemetry, projectFingerprint, projectMemoryFilePath, renderProjectMemory } from "./project-memory";
 
 const kPatched = Symbol.for("oh-my-pi-ultra.project-memory.patched");
 interface MemoryState extends AgentState { projectMemory?: MemoryTelemetry; }
@@ -90,6 +72,14 @@ async function capture(agent: Agent, task: string, store: ProjectMemoryStore, fi
 		if (result.action === "updated") runtime.telemetry.updated += 1;
 		if (result.action === "invalidated") runtime.telemetry.invalidated += 1;
 	}
+	const profile = getRepositoryIntelligence(agent)?.profile as unknown as Record<string, unknown> | undefined;
+	if (!profile) return;
+	const authority: MemoryCandidate[] = [];
+	if (typeof profile.packageManager === "string") authority.push({ type: "TOOLING", content: `Project uses ${profile.packageManager} as its package manager.`, source: "repository intelligence", scope: "PROJECT", confidence: 0.99, trust: "VERIFIED", relevance: 1, repositoryFingerprint: fingerprint, verified: true });
+	if (typeof profile.testFramework === "string") authority.push({ type: "TOOLING", content: `Tests use ${profile.testFramework}.`, source: "repository intelligence", scope: "PROJECT", confidence: 0.99, trust: "VERIFIED", relevance: 1, repositoryFingerprint: fingerprint, verified: true });
+	if (!authority.length) return;
+	runtime.telemetry.validationEvents += authority.length;
+	try { runtime.telemetry.invalidated += await store.reconcileRepositoryFacts(authority); } catch { runtime.telemetry.degraded = true; }
 }
 function patch(): void {
 	const target = Agent.prototype as Agent & { [key: symbol]: unknown }; if (target[kPatched]) return; target[kPatched] = true;
@@ -99,7 +89,6 @@ function patch(): void {
 		const task = promptText(args[0]); if (!task) return original.apply(this, args);
 		const cwd = process.cwd(); const fingerprint = await projectFingerprint(cwd); const store = new ProjectMemoryStore(projectMemoryFilePath(getAgentDir(), cwd), cwd, { maxItems: positive("PI_PROJECT_MEMORY_MAX_ITEMS", 128), maxItemsPerCategory: positive("PI_PROJECT_MEMORY_MAX_CATEGORY_ITEMS", 32), maxContentChars: positive("PI_PROJECT_MEMORY_MAX_CONTENT_CHARS", 1600) });
 		const runtime: ProjectMemoryRuntime = { store, telemetry: { candidates: 0, accepted: 0, rejected: 0, deduplicated: 0, updated: 0, invalidated: 0, retrieved: 0, notRetrieved: 0, validationEvents: 0, memoryContextTokens: 0, lookupLatencyMs: 0, storageLatencyMs: 0, degraded: false, rejectionReasons: {} }, removeHook: () => {} };
-		byAgent.set(this, runtime);
 		try {
 			const loaded = await loadMemoryContext(this, task, store, fingerprint); runtime.telemetry.retrieved = loaded.retrieved; runtime.telemetry.notRetrieved = loaded.notRetrieved; runtime.telemetry.memoryContextTokens = loaded.tokens; runtime.telemetry.lookupLatencyMs = loaded.latencyMs;
 			if (loaded.message) runtime.removeHook = this.addBeforeModelCall(async context => {
@@ -108,7 +97,7 @@ function patch(): void {
 			});
 			publish(this, runtime); return await original.apply(this, args);
 		} catch { runtime.telemetry.degraded = true; publish(this, runtime); return await original.apply(this, args); }
-		finally { try { runtime.removeHook(); } catch {} try { await capture(this, task, store, fingerprint, runtime); } catch { runtime.telemetry.degraded = true; } publish(this, runtime); byAgent.delete(this); }
+		finally { try { runtime.removeHook(); } catch {} try { await capture(this, task, store, fingerprint, runtime); } catch { runtime.telemetry.degraded = true; } publish(this, runtime); }
 	};
 }
 patch();
